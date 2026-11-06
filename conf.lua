@@ -155,4 +155,10 @@ function love.conf(t)
       t.window.y = -30000
     end
   end
+  -- WEAROS-PATCH: desktop preview of the watch build (POKEPORT_WATCH=1):
+  -- a square window the size of a Galaxy Watch 7 44mm screen
+  if os.getenv("POKEPORT_WATCH") == "1" and not companion and not editor then
+    t.window.width, t.window.height = 480, 480
+    t.window.minwidth, t.window.minheight = 200, 200
+  end
 end

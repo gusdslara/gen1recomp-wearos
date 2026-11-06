@@ -113,6 +113,10 @@ function Space.ensureBundle(mod)
   local root = Extract.CACHE_ROOT or "data/generated/gba"
   local cache = (mod and mod.cache) or love_cache()
   local bundle = ExtractScripts.loadBundle(cache, root, { allowIncomplete = true })
+  -- WEAROS-PATCH: on the watch, the texts of the watch's language replace
+  -- the English ones (src/core/WatchTranslate.lua); nothing loads it elsewhere
+  local WatchTranslate = package.loaded["src.core.WatchTranslate"]
+  if WatchTranslate and bundle then pcall(WatchTranslate.patchBundle, bundle) end
   Space.bundle = bundle
   Space.installLabels(bundle, cache, root)
   local nEv = 0

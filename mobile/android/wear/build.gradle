@@ -1,0 +1,153 @@
+// Wear OS build of the FireRed port (gen1recomp / LOVE 11.5).
+//
+// Reuses the vendored :love library (SDL2 + LOVE native code) in its "embed"
+// flavor and packs the game itself into assets/game.love automatically, so
+// Android Studio's Run button is all it takes: no bash scripts, works on
+// Windows.  The packed game carries a `wearos.flag` file, which is how the Lua
+// side knows it runs on a watch (src/core/Watch.lua).
+
+apply plugin: 'com.android.application'
+
+// gen1recomp/ (this file lives at gen1recomp/mobile/android/wear/)
+def repoRoot = file('../../..')
+
+android {
+    namespace "com.wearports.firered"
+    ndkVersion '25.2.9519653'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.wearports.firered"
+        // Wear OS 3+ (Galaxy Watch 4 and newer, Pixel Watch)
+        minSdk 30
+        targetSdk 36
+        versionCode 1
+        versionName "0.1.0-wear"
+        // :love has a 'mode' dimension (normal = file browser, embed = game
+        // inside the APK); a watch build always embeds the game.
+        missingDimensionStrategy 'mode', 'embed'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Signed with the debug key so `assembleRelease` installs straight
+            // away; swap in your own keystore before publishing anywhere.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    androidResources {
+        // game.love is already a zip; storing it avoids double compression and
+        // lets LOVE map it faster on the watch's slow storage.
+        noCompress 'love'
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+// ----------------------------------------------------------------- game.love
+// Same payload as scripts/build_android.sh pack_game_love: the Lua engine,
+// data, art and the ROM-import manifests.  No ROM and no generated ROM data:
+// those come from the player's own FireRed ROM on first launch.
+def extraDir = file('love-extra')
+// Development convenience: debug builds pack any FireRed .gba found in
+// wear/dev-rom/ into game.love as devrom/<name>.gba, and the watch imports it
+// on its own on first launch (src/core/WatchBoot.lua) -- no launcher, no adb
+// push.  Release builds never carry it.  *.gba is git-ignored.
+// `gradlew :wear:assembleDebug -PwearNoRom` builds a debug APK without it.
+def devRomDir = file('dev-rom')
+def packDevRom = !project.hasProperty('wearNoRom')
+// Community mods that ship pre-installed on the watch (every build type):
+// each folder in wear/bundled-mods/ lands in game.love as mods/<folder>/, where
+// the mod loader finds it next to anything installed in the save folder.  A
+// mod with no saved on/off choice loads enabled.  `-PwearNoMods` leaves them out.
+def bundledModsDir = file('bundled-mods')
+def packBundledMods = !project.hasProperty('wearNoMods')
+// Game text in the watch's language (src/core/WatchTranslate.lua).  The
+// translation recipes (addresses only, no text) ship in every build as
+// watchlang/recipe_*.json.  The text itself comes from that language's FireRed
+// ROM: players copy it into the save folder's idioma/ (adb push); debug builds
+// also pack the ROMs of wear/rom-sources/ into game.love as idioma/<name>.gba,
+// so a development watch opens in its own language straight away.
+// `-PwearLangs=pt` (or `pt,es`) packs only those, `-PwearLangs=none` none.
+def translationToolDir = file('translation-tool')
+def romSourcesDir = file('rom-sources')
+def langRomFiles = [pt: 'firered_ptbr.gba', es: 'firered_es.gba', fr: 'firered_fr.gba', it: 'firered_it.gba']
+def wearLangs = project.findProperty('wearLangs')?.toString()?.trim()
+def langRomNames = (!wearLangs || wearLangs == 'all') ? langRomFiles.values().toList()
+        : (wearLangs == 'none' ? [] : wearLangs.split(',').collect { langRomFiles[it.trim()] }.findAll { it })
+def configureGameLove = { Zip z, boolean withDevRom, boolean withLangRoms ->
+    z.archiveFileName.set('game.love')
+    z.preserveFileTimestamps = false
+    z.reproducibleFileOrder = true
+    z.from(repoRoot) {
+        include 'main.lua', 'conf.lua'
+        include 'src/**', 'data/**', 'assets/**'
+        include 'tools/save-editor/**', 'tools/rom_manifest*.json'
+        exclude '**/.DS_Store', '**/*.psd', '**/.git/**'
+        exclude 'data/generated/**', 'assets/generated/**'
+    }
+    // marker read by src/core/Watch.lua
+    z.from(extraDir) {
+        include 'wearos.flag'
+    }
+    if (packBundledMods) {
+        z.from(bundledModsDir) {
+            exclude '**/.DS_Store', '**/.git/**', 'README.md'
+            into 'mods'
+        }
+    }
+    z.from(translationToolDir) {
+        include 'recipe_*.json'
+        into 'watchlang'
+    }
+    if (withLangRoms && !langRomNames.isEmpty()) {
+        z.from(romSourcesDir) {
+            include langRomNames
+            into 'idioma'
+        }
+        z.doFirst {
+            def present = langRomNames.findAll { new File(romSourcesDir, it).exists() }
+            logger.lifecycle("wear: dev build packs language ROMs ${present ? present.join(', ') : '(none found)'}")
+        }
+    }
+    if (withDevRom) {
+        z.from(devRomDir) {
+            include '*.gba', '*.GBA'
+            into 'devrom'
+        }
+        z.doFirst {
+            def roms = devRomDir.listFiles()?.findAll { it.name.toLowerCase().endsWith('.gba') } ?: []
+            if (roms.isEmpty()) {
+                logger.warn("wear: no ROM in ${devRomDir} -- this debug build will " +
+                        "ask for one on the watch (launcher / adb push)")
+            } else {
+                logger.lifecycle("wear: dev build packs ROM ${roms*.name.join(', ')}")
+            }
+        }
+    }
+}
+
+// One packing task per variant (packDebugGameLove, packReleaseGameLove); AGP
+// owns the output folder and merges it into the APK's assets.
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def taskName = "pack${variant.name.capitalize()}GameLove"
+        def withRom = packDevRom && variant.buildType == 'debug'
+        def packTask = project.tasks.register(taskName, Zip) {
+            configureGameLove(it, withRom, variant.buildType == 'debug')
+        }
+        variant.sources.assets?.addGeneratedSourceDirectory(packTask) { it.destinationDirectory }
+    }
+}
+
+dependencies {
+    implementation project(':love')
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    // QR code of the ROM upload URL (RomInbox.java)
+    implementation 'com.google.zxing:core:3.5.3'
+}

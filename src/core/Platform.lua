@@ -11,6 +11,9 @@ local function compute()
   local uwp = osName == "UWP"
   local ps4 = osName == "PS4"
   local mobile = osName == "Android" or osName == "iOS"
+  -- WEAROS-PATCH: the watch build must never self-update to the phone APK
+  local okW, Watch = pcall(require, "src.core.Watch")
+  local watch = okW and type(Watch) == "table" and Watch.active() or false
   local nativePicker = love and love.system
     and type(love.system.pickFile) == "function"
   local nativeHttp = love and love.system
@@ -27,7 +30,7 @@ local function compute()
     romImportMode = (nx or ps4) and "save-directory"
       or (nativePicker and "native-picker")
       or "desktop",
-    networkValidated = not nx and not uwp and not ps4,
+    networkValidated = not nx and not uwp and not ps4 and not watch,
     -- networkValidated is the self-updater's gate and stays a per-platform
     -- policy call: a console package cannot replace itself on disk, so that
     -- answer never depends on whether a transport exists.  Fetching a mod

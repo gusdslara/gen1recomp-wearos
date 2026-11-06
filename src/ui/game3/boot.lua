@@ -338,6 +338,23 @@ local function tickSaveError(state, pressed)
   return nil
 end
 
+-- WEAROS-PATCH: the watch boots like a native app -- straight onto the
+-- CONTINUE / NEW GAME menu when there is a save (or onto the save-error
+-- notice, exactly as the title would lead there), skipping intro and title.
+-- B on that menu still goes back to the title, as on the cartridge.
+function Boot.enterMenu(state)
+  if state.custom then return false end
+  state.phase = Boot.PHASE.MENU
+  state.timer = 0
+  state.menuIndex = 1
+  if state.saveStatus == "invalid" or state.saveStatus == "error" then
+    beginSaveError(state)
+  else
+    beginMenuFade(state, "white", 16, 0, nil) -- pokefirered/src/main_menu.c:398
+  end
+  return true
+end
+
 function Boot.update(state, input, dt)
   if state.custom then return BootModules.update(Boot, state, input, dt) end
   dt = dt or (1 / 60)

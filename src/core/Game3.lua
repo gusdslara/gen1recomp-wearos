@@ -163,6 +163,7 @@ function Game3:load(opts)
   local TouchControls = lazyReq("src.core.TouchControls")
   TouchControls:init()
   self.touchControls = TouchControls
+  TouchControls.game = self -- WEAROS-PATCH: watch gestures read loaded mods
   TouchControls:setHotkeyHandler(function(action, pressed)
     if not action then return end
     if action:sub(1, 4) == "key:" then
@@ -245,6 +246,17 @@ function Game3:load(opts)
   end
   Boot.setSaveStatus(self.boot, saveStatus)
   Boot.setTextSpeed(self.boot, Options.block(self.options).textSpeed)
+  -- WEAROS-PATCH: open like a native watch app -- with a save, straight to
+  -- CONTINUE; without one, straight to the title (no copyright / intro movie)
+  if lazyReq("src.core.Watch").active() and not self.boot.custom then
+    if continueOk or saveStatus ~= "ok" then
+      Boot.enterMenu(self.boot)
+    else
+      self.boot.phase = Boot.PHASE.TITLE
+      self.boot.timer = 0
+      Boot.enterTitle(self.boot)
+    end
+  end
   self.phase = "boot"
   self.session = nil
 
@@ -1591,6 +1603,7 @@ function Game3:reset()
   Display.release()
   if self.touchControls then
     pcall(function() self.touchControls:setHotkeyHandler(nil) end)
+    pcall(function() self.touchControls.game = nil end) -- WEAROS-PATCH
     self.touchControls = nil
   end
   self.boot = nil

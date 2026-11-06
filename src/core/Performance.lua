@@ -39,6 +39,7 @@ Performance.LABELS = {
   high = "HIGH",
   balanced = "BALANCED",
   low = "LOW",
+  watch = "WATCH", -- WEAROS-PATCH
 }
 
 -- What each concrete tier permits.  `auto` is resolved to one of these
@@ -62,6 +63,8 @@ Performance.CAPS = {
   high     = { tilt = true,  survey = true,  shaderfx = 1.0,   fpsMax = false },
   balanced = { tilt = false, survey = true,  shaderfx = false, fpsMax = false },
   low      = { tilt = false, survey = false, shaderfx = false, fpsMax = 60 },
+  -- WEAROS-PATCH: keep the 3D tilt, drop the costly extras, render at 30 FPS
+  watch    = { tilt = true,  survey = false, shaderfx = false, fpsMax = 30 },
 }
 
 -- Live resolved tier (never "auto"); Game:applyOptions sets it and the
@@ -98,6 +101,9 @@ end
 -- options.lua predates this option -- resolves to HIGH and behaves exactly
 -- as before.
 function Performance.detect()
+  -- WEAROS-PATCH: smartwatch build
+  local okW, Watch = pcall(require, "src.core.Watch")
+  if okW and type(Watch) == "table" and Watch.active() then return "watch" end
   local os = loveOS()
   local arch = cpuArch()
   local isArm = arch == "arm" or arch == "arm64"

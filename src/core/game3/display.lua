@@ -84,6 +84,20 @@ function Display.fit(winW, winH)
     if d and d > 1e-6 then dpiX, dpiY = d, d end
   end
 
+  -- WEAROS-PATCH: round watch -> UI inscribed in the circle (fractional)
+  local okW, Watch = pcall(require, "src.core.Watch")
+  if okW and Watch.active() then
+    local fx, fy, fw, fh = Watch.screenRect(winW, winH)
+    local k = Watch.uiScale(fw * dpiX, fh * dpiY, Display.W, Display.H, nil)
+    if k then
+      local scaleX, scaleY = k / dpiX, k / dpiY
+      local pw, ph = Display.W * scaleX, Display.H * scaleY
+      local ox = math.floor((fx + (fw - pw) * 0.5) * dpiX + 1e-9) / dpiX
+      local oy = math.floor((fy + (fh - ph) * 0.5) * dpiY + 1e-9) / dpiY
+      return scaleX, ox, oy, pw, ph, scaleY
+    end
+  end
+
   local okPF, Playfield = pcall(require, "src.render.Playfield")
   if okPF and Playfield and Playfield.cutout then
     local vx, vy, vw, vh = Playfield.cutout(winW, winH)
@@ -219,6 +233,7 @@ local function prepareRenderer(game, kind)
   Renderer:setUISize(Display.W, Display.H)
   local opts = (game and game.options) or {}
   Renderer.uiCentered = (opts.uiLayout ~= "dynamic")
+    or require("src.core.Watch").active() -- WEAROS-PATCH: corners are off-screen
   Renderer.uiFill = false
   Renderer.uiWorldHold = false
   Renderer.battleDim = nil

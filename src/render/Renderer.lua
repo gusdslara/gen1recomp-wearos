@@ -17,6 +17,7 @@ local GameViewport = require("src.render.GameViewport")
 local FaithfulRes = require("src.core.FaithfulRes")
 local ScreenPosition = require("src.core.ScreenPosition")
 local Playfield = require("src.render.Playfield")
+local Watch = require("src.core.Watch") -- WEAROS-PATCH
 
 local Renderer = {}
 
@@ -96,6 +97,13 @@ local function displayMetrics()
   end
   if dpiX < 1e-6 then dpiX = 1 end
   if dpiY < 1e-6 then dpiY = 1 end
+  -- WEAROS-PATCH: the frame is the visible round face, not the window (which
+  -- can be wider than the display), and phone skins / cutouts never apply
+  if Watch.active() then
+    local rx, ry, rw, rh = Watch.screenRect(ww, wh)
+    return ww, wh, math.floor(rw * dpiX + 0.5), math.floor(rh * dpiY + 0.5),
+      dpiX, dpiY, math.floor(rx * dpiX + 0.5), math.floor(ry * dpiY + 0.5), false
+  end
   local vx, vy = 0, 0
   local cut = false
   local sx, sy, sw, sh = Playfield.cutout(pw, ph)
@@ -107,6 +115,7 @@ end
 
 local function positionLift(ph, contentPx, dpiY, cut)
   if cut then return 0 end
+  if Watch.active() then return 0 end -- WEAROS-PATCH: always dead centre
   return ScreenPosition.lift(ph, contentPx, ScreenPosition.safeTop() * dpiY)
 end
 
@@ -123,6 +132,10 @@ function Renderer:releaseCanvases()
   releaseCanvas(self.worldCanvas); self.worldCanvas = nil
   releaseCanvas(self.uprightCanvas); self.uprightCanvas = nil
   releaseCanvas(self.tiltOverheadCanvas); self.tiltOverheadCanvas = nil
+  if self._watchAmbient then -- WEAROS-PATCH
+    releaseCanvas(self._watchAmbient.a); releaseCanvas(self._watchAmbient.b)
+    self._watchAmbient = nil
+  end
   self.worldActive = false
   self.uprightActive = false
   self.uprightOccluded = false
@@ -176,6 +189,9 @@ function Renderer:fitScale()
   local _, _, pw, ph = displayMetrics()
   local w, h = self:uiSize()
   local s = math.max(1, math.floor(math.min(pw / w, ph / h)))
+  -- WEAROS-PATCH: on a round watch the map fills the circle at a whole
+  -- scale picked for ~Watch.config.worldView GBA pixels across
+  if Watch.active() then s = Watch.worldScale(pw, ph) end
   -- FAITHFUL RATIO on mobile locks the scale here rather than by resizing the
   -- window, which a phone does not have (see src/core/FaithfulRes.lua).  The
   -- cap is the largest WHOLE multiple the display holds, so the picture is as
@@ -896,6 +912,61 @@ end
 -- scissored through the shade-remap shader, later zones on top.
 -- When ShaderFX is active the composite is drawn into presentCanvas and
 -- presented through the shader chain as a final pass.
+-- WEAROS-PATCH: a 3:2 screen inscribed in a round display leaves four black
+-- caps.  When the UI owns the whole frame (intro, title, menus, battle) they
+-- are filled with the frame itself, blurred and dimmed, scaled to cover the
+-- circle: the picture reads as reaching the bezel, while the sharp copy on
+-- top stays fully inside it, text included.  The blur is two cheap linear
+-- downsamples (240x160 -> 60x40 -> 15x10) and one upscale; no shader.
+function Renderer:drawWatchAmbient(uox, uoy, uvpw, uvph, vux, vuy, vuw, vuh)
+  local src = self.canvas
+  if not src or uvpw <= 0 or uvph <= 0 then return end
+  local G = love.graphics
+  local okDim, sw, sh = pcall(function() return src:getDimensions() end)
+  if not okDim or not sw or sw <= 0 or sh <= 0 then return end
+  local w1, h1 = math.max(1, math.floor(sw / 4)), math.max(1, math.floor(sh / 4))
+  local w2, h2 = math.max(1, math.floor(sw / 16)), math.max(1, math.floor(sh / 16))
+  local amb = self._watchAmbient
+  if not amb or amb.sw ~= sw or amb.sh ~= sh then
+    if amb then
+      pcall(function() amb.a:release(); amb.b:release() end)
+    end
+    local okA, a = pcall(G.newCanvas, w1, h1, { dpiscale = 1 })
+    local okB, b = pcall(G.newCanvas, w2, h2, { dpiscale = 1 })
+    if not (okA and okB and a and b) then return end
+    a:setFilter("linear", "linear")
+    b:setFilter("linear", "linear")
+    amb = { sw = sw, sh = sh, a = a, b = b }
+    self._watchAmbient = amb
+  end
+  local minF, magF = src:getFilter()
+  G.push("all")
+  G.origin()
+  G.setShader()
+  G.setScissor()
+  G.setBlendMode("alpha")
+  G.setColor(1, 1, 1, 1)
+  src:setFilter("linear", "linear")
+  G.setCanvas(amb.a)
+  G.clear(0, 0, 0, 1)
+  G.draw(src, 0, 0, 0, w1 / sw, h1 / sh)
+  G.setCanvas(amb.b)
+  G.clear(0, 0, 0, 1)
+  G.draw(amb.a, 0, 0, 0, w2 / w1, h2 / h1)
+  G.pop()
+  src:setFilter(minF, magF)
+  -- cover the whole view around the centre of the sharp copy
+  local cx, cy = uox + uvpw / 2, uoy + uvph / 2
+  local reach = math.max(cx - vux, vux + vuw - cx) * 2
+  local reachY = math.max(cy - vuy, vuy + vuh - cy) * 2
+  local k = math.max(reach / uvpw, reachY / uvph)
+  local dw, dh = uvpw * k, uvph * k
+  local dim = Watch.config.ambientDim or 0.55
+  G.setColor(dim, dim, dim, 1)
+  G.draw(amb.b, cx - dw / 2, cy - dh / 2, 0, dw / w2, dh / h2)
+  G.setColor(1, 1, 1, 1)
+end
+
 function Renderer:frameRects()
   local ww, wh, pw, ph, dpiX, dpiY, vx, vy, cut = displayMetrics()
   local r = {
@@ -926,6 +997,10 @@ function Renderer:frameRects()
   -- window scales to fit instead of overflowing off both sides.
   if self.uiFill and not FaithfulRes.scaleCap() then
     Up = math.min(ph / uih, pw / uiw)
+  end
+  -- WEAROS-PATCH: UI (text boxes, menus, battle) inscribed in the circle
+  if Watch.active() and not self.uiFill then
+    Up = Watch.uiScale(pw, ph, uiw, uih, Up)
   end
   if uiw * Up > pw or uih * Up > ph then
     Up = math.min(ph / uih, pw / uiw)
@@ -1142,6 +1217,11 @@ function Renderer:endFrame(zones, worldZones, frameOpts)
     love.graphics.rectangle("fill", uox, vuy, uvpw, vuh)
   end
   love.graphics.setColor(1, 1, 1, 1)
+  -- WEAROS-PATCH: no black caps around a full-screen UI on the round watch
+  if Watch.active() and Watch.config.fill == "ambient" and not self.worldActive
+     and not self.worldOverride and self.uiOpaque then
+    self:drawWatchAmbient(uox, uoy, uvpw, uvph, vux, vuy, vuw, vuh)
+  end
   -- render.letterbox: SGB borders / custom void art in the bars around the
   -- 160x144 (or world) blit.  Drawn after the clear and before the game
   -- canvas so the playfield sits on top of the border.

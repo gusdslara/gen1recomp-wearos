@@ -145,6 +145,9 @@ end
 -- Returns true only when the request actually landed, never unconditionally
 -- as it once did (#1638).
 function Orientation.apply(mode)
+  -- WEAROS-PATCH: a round watch never rotates; any request skews the window
+  local okW, Watch = pcall(require, "src.core.Watch")
+  if okW and Watch.active() then return false end
   local android = Orientation.isAndroid()
   if not (android or Orientation.isIOS()) then return false end
   local ffi = sdlFfi()

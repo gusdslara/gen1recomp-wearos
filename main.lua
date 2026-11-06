@@ -726,6 +726,12 @@ function bootGame(version, cartId, opts)
   if GameVersion.generation() == 3 then
     Game = require("src.core.Game3").new()
     Game.returnToLauncher = function(o) pendingLauncherReturn = o or {} end
+    -- WEAROS-PATCH: EXIT on the watch closes the app; no launcher behind it
+    if require("src.core.Watch").active() then
+      Game.returnToLauncher = function()
+        if love.event and love.event.quit then love.event.quit() end
+      end
+    end
     Game:load(loadOpts)
   elseif GameVersion.generation() == 2 then
     Game = require("src.core.Game2").new()
@@ -799,6 +805,9 @@ local function startLaunchRequest(request)
   end
 
   if Game then
+    -- WEAROS-PATCH: the watch is already in its one game; a repeated launch
+    -- intent must not tear it down into the launcher
+    if require("src.core.Watch").active() then return true end
     returnToLauncher({ request = request })
     return true
   end
@@ -975,6 +984,34 @@ function love.load(args)
   local handoff = readRelaunchHandoff()
   local relaunched = handoff ~= nil
   if relaunched and os.getenv("POKEPORT_DRIVER") then scripted = nil end
+
+  -- WEAROS-PATCH: the watch opens like a native game.  There is no launcher
+  -- to come back to, so a stale relaunch marker (left by an older build that
+  -- restarted into it on close) is ignored; and a development build that
+  -- carries the ROM imports it on its own instead of showing the launcher;
+  -- a release build waits on a round screen for the ROM to be copied over.
+  if require("src.core.Watch").active() and not scripted then
+    relaunched, handoff = false, nil
+    local version = resolvedLaunch.game or "firered"
+    resolvedLaunch.game = version
+    resolvedLaunch.launcher = false
+    -- the translation mod matching the watch's language, before mods load
+    pcall(function() require("src.core.WatchText").applyTranslationMods(version) end)
+    -- the game's own text in the watch's language, when that language's
+    -- FireRed ROM is on the watch (src/core/WatchTranslate.lua)
+    pcall(function() require("src.core.WatchTranslate").start(version) end)
+    if not RomImporter.isReady(version) then
+      -- first run: import the bundled ROM (dev) or wait for one to be copied
+      -- into the save folder (release) on a round screen, then boot
+      Importer = require("src.core.WatchBoot").start(RomImporter,
+        function(v)
+          Importer = nil
+          launchedIntoGame = true
+          bootGame(v or version)
+        end)
+      return
+    end
+  end
 
   if scripted then
     if forceImport or not ready then
@@ -1180,6 +1217,10 @@ function love.draw()
   if Prelaunch then
     GameViewport.reset()
     return Prelaunch:draw()
+  end
+  if Importer and Importer._watchImport then -- WEAROS-PATCH
+    GameViewport.reset()
+    return require("src.core.WatchBoot").draw(Importer)
   end
   if Importer then
     GameViewport.reset()
@@ -1566,6 +1607,13 @@ function love.wheelmoved(x, y)
   if Studio then return Studio.wheelmoved(x, y) end
   if Importer then return end
   if not Game then return end
+  -- WEAROS-PATCH: rotating bezel / crown scrolls menus, zooms the map
+  local WatchGestures = package.loaded["src.core.WatchGestures"]
+  if WatchGestures and WatchGestures.wheelmoved then
+    local handled, wy = WatchGestures:wheelmoved(x, y)
+    if handled then return end
+    y = wy or y
+  end
   Game:wheelmoved(x, y)
 end
 
@@ -1738,6 +1786,7 @@ function love.quit()
   local wouldReturnToLauncher = PlatformHooks.quitToLauncher(function()
     return Game and not Importer and not quitToLauncher and not scripted
       and (mobile or not launchedIntoGame)
+      and not require("src.core.Watch").active() -- WEAROS-PATCH: just exit
   end)
   if wouldReturnToLauncher then
     local HostShell = require("src.core.HostShell")

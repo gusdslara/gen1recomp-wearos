@@ -36,6 +36,9 @@
 local Input = require("src.core.Input")
 local SafeArea = require("src.core.SafeArea")
 local TouchSkin = require("src.core.TouchSkin")
+-- WEAROS-PATCH: on a watch the whole screen is a gesture pad instead
+local Watch = require("src.core.Watch")
+local WatchGestures = require("src.core.WatchGestures")
 
 local TouchControls = {}
 
@@ -275,6 +278,8 @@ end
 
 function TouchControls:init()
   self.active = wantsOverlay()
+  self.watch = Watch.active() -- WEAROS-PATCH
+  if self.watch then WatchGestures:init(self) end
   TouchSkin.setOverlayLive(self.active)
   self.enabled = true
   self.generation = nil
@@ -308,7 +313,7 @@ function TouchControls:init()
   self.img = nil
   -- Images load whenever the platform wants the overlay OR the launcher
   -- editor forces a preview (desktop testing of the editor).
-  if self.active then
+  if self.active and not self.watch then -- WEAROS-PATCH: no overlay art
     self.img = loadImages()
   end
 end
@@ -379,6 +384,7 @@ function TouchControls:setPreview(on)
 end
 
 function TouchControls:visible()
+  if self.watch and not self.preview then return false end -- WEAROS-PATCH
   local art = TouchSkin.active ~= nil or self.img ~= nil
   if self.preview then return art end
   if self.enabled == false or not art then return false end
@@ -777,6 +783,7 @@ end
 -- whole lifecycle; an uncaptured touch is never tracked, so wandering
 -- across a control later neither presses it nor hides the touch from mods.
 function TouchControls:touchpressed(id, x, y)
+  if self.watch and not self.preview then return WatchGestures:touchpressed(id, x, y) end -- WEAROS-PATCH
   -- preview mode is layout-edit only: never press GB buttons
   if self.preview then return end
   if not (self.active and self.enabled ~= false
@@ -832,6 +839,7 @@ function TouchControls:touchpressed(id, x, y)
 end
 
 function TouchControls:touchmoved(id, x, y)
+  if self.watch and not self.preview then return WatchGestures:touchmoved(id, x, y) end -- WEAROS-PATCH
   if self.preview then return end
   local touch = self.touches[id]
   if not touch then return end
@@ -846,6 +854,7 @@ function TouchControls:touchmoved(id, x, y)
 end
 
 function TouchControls:touchreleased(id, x, y)
+  if self.watch and not self.preview then return WatchGestures:touchreleased(id, x, y) end -- WEAROS-PATCH
   if self.preview then return end
   local touch = self.touches[id]
   if not touch then return end
@@ -868,6 +877,7 @@ end
 -- touchreleased and would strand its button held forever.  Called from
 -- Game alongside Input:reset() on focus/visibility loss.
 function TouchControls:reset()
+  if self.watch then WatchGestures:reset() end -- WEAROS-PATCH
   for _, touch in pairs(self.touches or {}) do
     if touch.control == "skin" and touch.set then
       for ctl in pairs(touch.set) do exitControl(self, ctl) end
@@ -893,6 +903,7 @@ end
 -- permanently disabled the overlay -- there is nothing to hide, and a
 -- later accidental touch must not resurrect it.
 function TouchControls:noteGamepad()
+  if self.watch then return end -- WEAROS-PATCH: gestures stay live with a pad
   if not self.active or self.enabled == false or self.controllerHidden then
     return
   end
@@ -972,6 +983,7 @@ end
 -- captured or scaled with any game viewport. Also used by the launcher layout
 -- editor under preview mode.
 function TouchControls:draw()
+  if self.watch and not self.preview then return WatchGestures:draw() end -- WEAROS-PATCH
   if not self:visible() then return end
   if TouchSkin.active then
     local mul = (self.preview and self.enabled == false) and 0.45 or 1

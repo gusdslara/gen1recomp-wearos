@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">Pokemon Fire Red</string>
+
+  <!-- Full screen, black, and NO swipe-to-dismiss: Wear OS would otherwise
+       close the game on every left-to-right swipe, which is our "right". -->
+  <style name="WearGameTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+    <item name="android:windowSwipeToDismiss">false</item>
+    <item name="android:windowFullscreen">true</item>
+    <item name="android:windowNoTitle">true</item>
+    <item name="android:windowBackground">@android:color/black</item>
+    <item name="android:windowContentOverlay">@null</item>
+  </style>
+</resources>

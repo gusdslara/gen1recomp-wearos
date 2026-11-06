@@ -491,6 +491,12 @@ function StartMenu.contentTemplate()
   -- Window height in tiles: pret (numActions*2)+2 includes frame padding;
   -- content height for n×15px rows ≈ ceil(n*15/8) tiles.
   local contentH = math.max(2, math.ceil((n * Window.OPTION_HEIGHT) / 8))
+  -- WEAROS-PATCH: on a round watch the GBA's top-right corner is outside the
+  -- glass; one tile left and one down keeps the whole menu frame inside it
+  local okW, Watch = pcall(require, "src.core.Watch")
+  if okW and Watch.active() then
+    return Window.template(21, 2, 7, contentH)
+  end
   return Window.template(22, 1, 7, contentH)
 end
 

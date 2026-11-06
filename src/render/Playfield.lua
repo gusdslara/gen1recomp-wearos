@@ -22,6 +22,9 @@ end
 
 function Playfield.cutout(sw, sh)
   if Playfield.entered then return nil end
+  -- WEAROS-PATCH: phone touch skins never carve the watch face
+  local okW, Watch = pcall(require, "src.core.Watch")
+  if okW and Watch.active() then return nil end
   if type(sw) ~= "number" or type(sh) ~= "number" then return nil end
   if sw < 1 or sh < 1 then return nil end
   if type(TouchSkin.viewport) ~= "function" then return nil end
