@@ -38,17 +38,19 @@ local Watch = require("src.core.Watch")
 local WatchText = require("src.core.WatchText")
 
 local WG = {}
+WG.SHOW_CONTROLS_FOR_PRINT = false -- defina true para prints; false para gameplay normal limpo
+
 
 local DIR_ANGLE = { right = 0, down = math.pi / 2, left = math.pi, up = -math.pi / 2 }
 
 -- where each button's rim indicator sits (radians, screen y down) and its tint
 local BUTTON = {
-  a      = { angle = 0,                 label = "A",      color = { 0.40, 0.95, 0.55 } },
-  b      = { angle = math.pi,           label = "B",      color = { 1.00, 0.45, 0.40 } },
-  start  = { angle = math.pi / 2,       label = "START",  color = { 0.45, 0.72, 1.00 } },
-  select = { angle = -math.pi / 2,      label = "SELECT", color = { 0.85, 0.62, 1.00 } },
-  l      = { angle = -3 * math.pi / 4,  label = "L",      color = { 1.00, 0.85, 0.35 } },
-  r      = { angle = -math.pi / 4,      label = "R",      color = { 1.00, 0.85, 0.35 } },
+  l      = { angle = -3 * math.pi / 4,  label = "L",      color = { 1.00, 0.85, 0.35 } }, -- Ambar (topo-esquerda)
+  select = { angle = -math.pi / 2,      label = "SELECT", color = { 0.85, 0.62, 1.00 } }, -- Roxo (topo-centro)
+  r      = { angle = -math.pi / 4,      label = "R",      color = { 1.00, 0.85, 0.35 } }, -- Ambar (topo-direita)
+  b      = { angle = math.pi,           label = "B",      color = { 1.00, 0.45, 0.40 } }, -- Vermelho (esquerda)
+  a      = { angle = 0,                 label = "A",      color = { 0.40, 0.95, 0.55 } }, -- Verde (direita)
+  start  = { angle = math.pi / 2,       label = "START",  color = { 0.45, 0.72, 1.00 } }, -- Azul (base-centro)
   tilt   = { angle = -math.pi / 2,      label = "3D",     color = { 1.00, 1.00, 1.00 } },
   flat   = { angle = -math.pi / 2,      label = "2D",     color = { 1.00, 1.00, 1.00 } },
 }
@@ -310,22 +312,19 @@ function WG:tick()
     end
   end
 
-  -- running: hold B while a direction is held far from the anchor (or always,
-  -- with alwaysRun), only in free roam so menus never see it
+  -- running: only hold B if two-finger running or alwaysRun is explicitly enabled in config.
+  -- One-finger walking NEVER automatically holds B to avoid accidental cancels or forced running.
   local wantRun = false
-  if self.dir and p and p.kind == "dir" and t - self.dirSince >= cfg.runDelay then
-    -- how far the finger has gone from where the swipe began (the stick's
-    -- own centre trails close behind, so that is not the measure)
-    local tx, ty = (p.x or 0) - (p.sx or p.x or 0), (p.y or 0) - (p.sy or p.y or 0)
-    local far = math.sqrt(tx * tx + ty * ty) >= cfg.runRadius * R
-    if (far or cfg.alwaysRun) and freeRoam() then wantRun = true end
+  if cfg.alwaysRun and self.dir and p and p.kind == "dir" and freeRoam() then
+    wantRun = true
   end
-  if wantRun then
+  if (self.two and self.two.running) or wantRun then
     down(self, "b", "run")
-  elseif self.held["watch:run"] then
+    self.running = true
+  elseif self.held["watch:run"] and not (self.two and self.two.running) then
     up(self, "run")
+    self.running = false
   end
-  self.running = wantRun
 
   -- let the watch sleep after a while without input (and keep it awake while
   -- playing); the activity then pauses and LOVE stops rendering entirely
@@ -371,24 +370,10 @@ function WG:touchpressed(id, x, y)
     self.two = { cx0 = (p.x + x) / 2, cy0 = (p.y + y) / 2, t0 = t, done = false }
     self.two.cx, self.two.cy = self.two.cx0, self.two.cy0
   elseif p.kind ~= "two" then
-    -- another finger while the first one walks / waits:
-    -- only register as aux button if primary is actually walking ('dir')
-    -- and the second touch is away from the screen center, preventing accidental
-    -- B (cancel) or A presses when the thumb slides or touches the screen during swipe
-    local _, _, R = screen()
-    local cx, cy = screen()
-    local distCenter = math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy))
-    if p.kind == "dir" and distCenter > 0.45 * R then
-      local btn = tapButton(x, y)
-      local tag = "aux:" .. tostring(id)
-      self.touches[id] = { kind = "aux", btn = btn, tag = tag, t0 = t }
-      self.pending[tag] = nil
-      down(self, btn, tag)
-      flash(self, btn)
-      if btn ~= "a" and btn ~= "b" then buzz(0.015) end
-    else
-      self.touches[id] = { kind = "ignored" }
-    end
+    -- When the primary finger is walking or waiting, ignore any secondary touches
+    -- to prevent accidental button presses (e.g. B or A) caused by thumb rolls,
+    -- palm edges, or bezel touches on the small watch screen.
+    self.touches[id] = { kind = "ignored" }
   else
     self.touches[id] = { kind = "ignored" }
   end
@@ -409,7 +394,26 @@ function WG:touchmoved(id, x, y)
     for _, o in pairs(self.touches) do
       if o.kind == "two" then sx, sy, k = sx + o.x, sy + o.y, k + 1 end
     end
-    if k > 0 then self.two.cx, self.two.cy = sx / k, sy / k end
+    if k > 0 then
+      self.two.cx, self.two.cy = sx / k, sy / k
+      local dx, dy = self.two.cx - self.two.cx0, self.two.cy - self.two.cy0
+      local dist = math.sqrt(dx * dx + dy * dy)
+      local swipePx = cfg.swipe * R
+      if dist >= swipePx and not self.two.fingers and freeRoam() then
+        if not self.two.running then
+          self.two.running = true
+          down(self, "b", "run")
+          self.running = true
+          flash(self, "b")
+        end
+        local newDir = dirOf(dx, dy, self.two.dir)
+        if newDir ~= self.two.dir then
+          if self.two.dir then up(self, "two_dir") end
+          self.two.dir = newDir
+          down(self, newDir, "two_dir")
+        end
+      end
+    end
     return
   end
 
@@ -494,11 +498,20 @@ function WG:touchreleased(id, x, y)
 
   if tch.kind == "two" and self.two then
     local two = self.two
+    if two.running then
+      up(self, "run")
+      self.running = false
+      if two.dir then
+        up(self, "two_dir")
+        two.dir = nil
+      end
+      two.done = true
+    end
     if not two.done then
       two.done = true
       local dx, dy = two.cx - two.cx0, two.cy - two.cy0
       local swipePx = cfg.swipe * R
-      if math.abs(dx) >= swipePx and math.abs(dx) > math.abs(dy) then
+      if not two.running and math.abs(dx) >= swipePx and math.abs(dx) > math.abs(dy) then
         tap(self, dx < 0 and "l" or "r")
         self.twoTapCount = 0
         self.lastTwoTap = nil
@@ -555,9 +568,18 @@ function WG:touchreleased(id, x, y)
   if id == self.primary then
     self.primary = nil
     if tch.kind == "pending" then
-      -- a finger that never travelled far enough to be a swipe is a tap,
-      -- however long it stayed down
-      tap(self, tapButton(tch.x0, tch.y0))
+      -- a finger that never travelled far enough to be a swipe:
+      -- check if there was noticeable motion (short flick); if so, take a step instead of tapping
+      local dx = (tch.x or tch.x0) - tch.x0
+      local dy = (tch.y or tch.y0) - tch.y0
+      local dist = math.sqrt(dx * dx + dy * dy)
+      local swipePx = cfg.swipe * R
+      if dist >= swipePx * 0.65 then
+        setDir(self, dirOf(dx, dy, nil))
+        endDir(self)
+      else
+        tap(self, tapButton(tch.x0, tch.y0))
+      end
     elseif tch.kind == "dir" then
       endDir(self)
       up(self, "run")
@@ -614,7 +636,8 @@ end
 local function getFont(self, G, R)
   if not self.font or self.fontR ~= R then
     local dpi = (G.getDPIScale and G.getDPIScale()) or 1
-    self.font = WatchText.font(11 * math.max(1, math.floor(R * dpi / 170 + 0.5)))
+    -- Tamanho de fonte aumentado para visual identico ao SMW
+    self.font = WatchText.font(math.max(16, math.floor(R * dpi * 0.095)))
     self.fontR = R
   end
   return self.font
@@ -625,21 +648,39 @@ end
 local function drawButtonArc(self, G, cx, cy, R, kind, alpha)
   local b = BUTTON[kind]
   if not b then return end
-  local lw = math.max(3, R * 0.03)
-  local half = (#b.label > 1) and 0.30 or 0.20
+  local lw = math.max(4.2, R * 0.042)
+  local half = (#b.label > 1) and 0.35 or 0.24
   local c = b.color
-  G.setColor(c[1], c[2], c[3], 0.85 * alpha)
+
+  -- Sombra preta sob o arco para contraste total (estilo SMW)
+  G.setColor(0, 0, 0, 0.88 * alpha)
+  G.setLineWidth(lw + 3.2)
+  G.arc("line", "open", cx, cy, R - lw, b.angle - half, b.angle + half, 20)
+
+  -- Arco luminoso
+  G.setColor(c[1], c[2], c[3], alpha)
   G.setLineWidth(lw)
-  G.arc("line", "open", cx, cy, R - lw, b.angle - half, b.angle + half, 16)
+  G.arc("line", "open", cx, cy, R - lw, b.angle - half, b.angle + half, 20)
+
   local font = getFont(self, G, R)
   G.setFont(font)
-  local lx = cx + math.cos(b.angle) * (R - lw * 2 - font:getHeight() * 0.9)
-  local ly = cy + math.sin(b.angle) * (R - lw * 2 - font:getHeight() * 0.9)
+  local labelDist = R - lw * 2.6
+  local lx = cx + math.cos(b.angle) * labelDist
+  local ly = cy + math.sin(b.angle) * labelDist + 1
   local tw = font:getWidth(b.label)
-  G.setColor(0, 0, 0, 0.45 * alpha)
-  G.print(b.label, math.floor(lx - tw / 2 + 1), math.floor(ly - font:getHeight() / 2 + 1))
-  G.setColor(c[1], c[2], c[3], alpha)
-  G.print(b.label, math.floor(lx - tw / 2), math.floor(ly - font:getHeight() / 2))
+  local th = font:getHeight()
+
+  -- Pilula preta de fundo com borda arredondada (identica ao SMW)
+  G.setColor(0.04, 0.05, 0.08, 0.88 * alpha)
+  G.rectangle("fill", math.floor(lx - tw / 2 - 6), math.floor(ly - th / 2 - 2), tw + 12, th + 4, 6, 6)
+
+  -- Sombra de texto
+  G.setColor(0, 0, 0, 0.90 * alpha)
+  G.print(b.label, math.floor(lx - tw / 2 + 1), math.floor(ly - th / 2 + 1))
+
+  -- Texto branco de alto brilho
+  G.setColor(1, 1, 1, alpha)
+  G.print(b.label, math.floor(lx - tw / 2), math.floor(ly - th / 2))
 end
 
 local function debugLines()
@@ -726,10 +767,20 @@ function WG:draw()
 
   local hasFlash = #self.flashes > 0
   local hint = self.hintUntil and t < self.hintUntil
-  if not (self.dir or hasFlash or hint or next(heldKinds) or self.debug or problem or loading) then return end
 
   G.push("all")
   G.origin()
+
+  -- Escurecimento de tela para prints (ativado somente quando WG.SHOW_CONTROLS_FOR_PRINT == true)
+  if WG.SHOW_CONTROLS_FOR_PRINT then
+    -- Escurecer profundamente a tela (~60% preto) para destaque total dos controles em jogos claros
+    G.setColor(0, 0, 0, 0.60)
+    G.circle("fill", cx, cy, R, 64)
+    -- Vinheta forte na borda circular onde ficam os botoes
+    G.setLineWidth(math.max(8, R * 0.22))
+    G.setColor(0, 0, 0, 0.68)
+    G.circle("line", cx, cy, R - math.max(4, R * 0.11), 64)
+  end
 
   if self.dir then
     local a = DIR_ANGLE[self.dir]
@@ -738,22 +789,38 @@ function WG:draw()
     G.arc("line", "open", cx, cy, R - math.max(3, R * 0.03), a - 0.38, a + 0.38, 16)
   end
 
-  for kind in pairs(heldKinds) do
-    drawButtonArc(self, G, cx, cy, R, kind, 1)
-  end
-
+  -- Todos os botões na borda circular (b, a, l, r, select, start)
+  -- Mantidos visíveis (~0.65 alpha) para exibir a interface completa na tela
+  -- e destacando com alpha 1.0 ao segurar ou tocar.
+  local defaultButtons = { "l", "select", "r", "b", "a", "start" }
+  local flashAlphas = {}
   if hasFlash then
     local keep = {}
     for _, f in ipairs(self.flashes) do
       local age = t - f.t
       if age < FLASH_TIME then
-        if not heldKinds[f.kind] then
-          drawButtonArc(self, G, cx, cy, R, f.kind, 1 - age / FLASH_TIME)
-        end
+        flashAlphas[f.kind] = math.max(flashAlphas[f.kind] or 0, 1 - age / FLASH_TIME)
         keep[#keep + 1] = f
       end
     end
     self.flashes = keep
+  end
+
+  for _, kind in ipairs(defaultButtons) do
+    local alpha = 0
+    if heldKinds[kind] then
+      alpha = 1.0
+    elseif flashAlphas[kind] then
+      alpha = flashAlphas[kind]
+    end
+
+    if WG.SHOW_CONTROLS_FOR_PRINT then
+      alpha = math.max(alpha, 0.95)
+    end
+
+    if alpha > 0 then
+      drawButtonArc(self, G, cx, cy, R, kind, alpha)
+    end
   end
 
   if hint then
