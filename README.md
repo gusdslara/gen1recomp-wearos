@@ -13,6 +13,41 @@ And before you say, "that's not a recomp", you're wrong. Recomp is an acronym. *
 
 <p align="center"><img src="https://raw.githubusercontent.com/bryanthaboi/gen1recomp/refs/heads/dev/assets/logo/logo.png"></p>
 
+---
+
+## ⌚ Wear OS Smartwatch Port (FireRed, Emerald & Gen 1/2)
+
+Play Pokémon FireRed, Emerald, and classic Gen 1/2 games natively on your **Wear OS smartwatch** (Samsung Galaxy Watch 4/5/6/7/Ultra, Google Pixel Watch 1/2/3, Xiaomi Watch 2, etc.) with custom touch gestures, rotary crown navigation, and real-time **3D Voxel Mode**!
+
+<p align="center">
+  <img src="watch_firered_controls_demo.png" alt="Pokémon FireRed on Wear OS - Controls & 3D Voxel Mode" width="800">
+</p>
+
+### 🎮 Smart Watch Controls & Gestures
+
+- **🕹️ Trail Virtual D-Pad**: Touch and slide anywhere on the watch screen to walk. The control anchor smoothly follows your thumb, keeping your field of view open on the small round watch face.
+- **🏃 2-Finger Sprint (Running Shoes)**: Hold two fingers while walking to sprint at top speed with Running Shoes (`B`). Designed with thumb roll protection so secondary accidental touches never cancel dialogue or menus.
+- **🧊 Real-Time 3D Voxel Perspective**: Triple tap with 2 fingers to instantly toggle between classic 2D pixel-art and an immersive 3D voxel world with camera tilt!
+- **⌚ Rotary Crown Navigation**: Spin the watch crown or touch bezel to speed through text dialogue, scroll through your Pokémon party / Bag, or zoom the 3D camera.
+- **🔘 Circular Bezel Buttons**:
+  - **`A` (Right rim)**: Interact / Talk / Confirm / Battle moves
+  - **`B` (Left rim)**: Cancel / Back / Close menu
+  - **`SELECT` (Top rim)**: Bicycle shortcut / Registered key item
+  - **`L` / `R` (Top shoulders)**: Help / Pokédex tabs
+  - **`START` (Bottom rim)**: Open main game menu / Bag / Save game
+- **📸 Print / Showcase Mode**: Developer toggle (`WG.SHOW_CONTROLS_FOR_PRINT = true`) darkens the background and maintains high-contrast button rings for promotional screenshots.
+
+### 🚀 Building & Installing for Wear OS
+
+```bash
+cd mobile/android
+./gradlew :wear:assembleDebug
+adb connect <WATCH_IP>:<PORT>
+adb install -r wear/build/outputs/apk/debug/wear-debug.apk
+```
+
+---
+
 # [SUPPORT / ANNOUNCEMENTS / MODS ALL FOUND ON THE DISCORD](https://bois.icu)
 
 <p align="center">
